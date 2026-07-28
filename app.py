@@ -2,8 +2,8 @@
 import streamlit as st
 import pandas as pd
 from database import init_db, get_connection
+from ai_analyzer import generate_executive_summary
 
-# Configurazione della pagina
 st.set_page_config(
     page_title="Skyline M&A Signals — Portal",
     page_icon="📈",
@@ -12,7 +12,6 @@ st.set_page_config(
 
 # --- SISTEMA DI AUTENTICAZIONE ---
 def check_password():
-    """Restituisce True se l'utente ha inserito credenziali valide."""
     def password_entered():
         user = st.session_state["username"]
         pwd = st.session_state["password"]
@@ -28,7 +27,6 @@ def check_password():
     if st.session_state.get("password_correct", False):
         return True
 
-    # Schermata di Login
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         st.markdown("## 🔒 Accesso Riservato — Skyline M&A Signals")
@@ -51,14 +49,12 @@ if st.sidebar.button("Disconnetti (Logout)"):
     st.session_state["password_correct"] = False
     st.rerun()
 
-# --- INIZIALIZZAZIONE DATABASE ---
 init_db()
 
 st.title("📈 Skyline M&A Signals — Corporate Intelligence")
 st.caption("Piattaforma di monitoraggio e identificazione precoce di target societari M&A")
 
 def load_data():
-    """Carica le aziende con il rispettivo punteggio aggiornato dal DB."""
     conn, _ = get_connection()
     query = """
     SELECT 
@@ -78,7 +74,6 @@ def load_data():
     return df
 
 def load_company_signals(company_id):
-    """Carica la cronologia dei segnali intercettati per un'azienda specifica."""
     conn, db_type = get_connection()
     placeholder = "%s" if db_type == "postgres" else "?"
     query = f"""
@@ -93,11 +88,9 @@ def load_company_signals(company_id):
     conn.close()
     return df
 
-# Caricamento Dati
 try:
     df = load_data()
 
-    # --- METRICHE KPI IN ALTO ---
     col1, col2, col3 = st.columns(3)
     total_companies = len(df)
     hot_targets = len(df[df["Score"] >= 30]) if not df.empty else 0
@@ -112,12 +105,10 @@ try:
     if df.empty:
         st.info("ℹ️ Il database cloud è attivo e pronto, ma non contiene ancora segnali salvati.")
     else:
-        # --- BARRA LATERALE PER I FILTRI ---
         st.sidebar.header("🔍 Filtri di Ricerca")
         min_score = st.sidebar.slider("Punteggio minimo (Score)", 0, 100, 0)
         search_query = st.sidebar.text_input("Cerca Azienda o P.IVA:")
 
-        # Applicazione Filtri
         filtered_df = df[df["Score"] >= min_score]
         if search_query:
             filtered_df = filtered_df[
@@ -125,7 +116,6 @@ try:
                 filtered_df["P.IVA"].str.contains(search_query, case=False, na=False)
             ]
 
-        # --- INTESTAZIONE TABELLA + PULSANTE EXPORT ---
         col_title, col_download = st.columns([3, 1])
         with col_title:
             st.subheader("📊 Classifica Target M&A")
@@ -139,7 +129,6 @@ try:
                 use_container_width=True
             )
 
-        # --- TABELLA PRINCIPALE ---
         display_df = filtered_df.drop(columns=["id"])
         st.dataframe(
             display_df,
@@ -149,19 +138,33 @@ try:
 
         st.divider()
 
-        # --- DETTAGLIO E CRONOLOGIA SEGNALI ---
-        st.subheader("🔎 Analisi Segnali per Singola Azienda")
+        # --- DETTAGLIO ED EXECUTIVE BRIEFING AI ---
+        st.subheader("🔎 Analisi Segnali & Executive Briefing IA")
         if not filtered_df.empty:
             selected_company = st.selectbox(
-                "Seleziona un'azienda per esaminarne i segnali storici:",
+                "Seleziona un'azienda per generare l'analisi o consultare i segnali:",
                 options=filtered_df["Azienda"].tolist()
             )
             
             selected_id = int(filtered_df[filtered_df["Azienda"] == selected_company]["id"].values[0])
             signals_df = load_company_signals(selected_id)
             
-            st.write(f"**Cronologia eventi intercettati per:** _{selected_company}_")
-            st.table(signals_df)
+            col_table, col_ai = st.columns([1, 1])
+
+            with col_table:
+                st.write(f"**Cronologia eventi intercettati per:** _{selected_company}_")
+                st.table(signals_df)
+
+            with col_ai:
+                st.write("**🤖 Generatore Executive Briefing AI**")
+                st.caption("Utilizza l'intelligenza artificiale per sintetizzare la tesi d'investimento ed i prossimi passi.")
+                
+                if st.button(f"⚡ Genera Briefing Strategico per {selected_company}", type="primary", use_container_width=True):
+                    with st.spinner("Analisi dei segnali in corso da parte del modello AI..."):
+                        signals_list = signals_df.to_dict(orient="records")
+                        ai_report = generate_executive_summary(selected_company, signals_list)
+                        st.markdown("---")
+                        st.info(ai_report)
 
 except Exception as e:
     st.error(f"Errore durante la lettura del database: {e}")
