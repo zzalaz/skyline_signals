@@ -24,4 +24,6 @@ jobs:
           pip install -r requirements.txt
 
       - name: Esegui Pipeline M&A
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: python main.py
