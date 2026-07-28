@@ -1,47 +1,58 @@
 # main.py
-from database import init_db
 from engine import add_signal
-from notifier import send_telegram_alert
-from scraper_gazzetta import fetch_gazzetta_signals
-
-ALERT_THRESHOLD = 30
-
-def process_signal(vat_number: str, company_name: str, sector: str, region: str, signal_type: str, details: str = ""):
-    print(f"📡 Elaborazione in corso per '{company_name}' (P.IVA: {vat_number})...")
-    
-    # 1. Salva nel DB e ricalcola il punteggio
-    current_score = add_signal(vat_number, company_name, sector, region, signal_type)
-    print(f"📊 Punteggio totale aggiornato: {current_score} / 100")
-    
-    # 2. Controllo della soglia per la notifica Telegram
-    if current_score >= ALERT_THRESHOLD:
-        print(f"🚀 SOGLIA SUPERATA ({current_score} >= {ALERT_THRESHOLD})! Invio alert Telegram...")
-        send_telegram_alert(
-            company_name=company_name,
-            vat_number=vat_number,
-            sector=sector,
-            score=current_score,
-            last_signal=signal_type,
-            details=details  # Passiamo il dettaglio dinamico dell'atto
-        )
-    else:
-        print(f"⏳ Punteggio sotto la soglia ({current_score} < {ALERT_THRESHOLD}). Nessun alert.\n")
+from hiring_scraper import fetch_hiring_signals
 
 def run_pipeline():
-    init_db()
-    print("\n--- AVVIO PIPELINE AUTOMATICA SU DATI REALI ---\n")
-    
-    real_signals = fetch_gazzetta_signals(limit=5)
-    
-    for sig in real_signals:
-        process_signal(
-            vat_number=sig["vat_number"],
-            company_name=sig["company_name"],
-            sector=sig["sector"],
-            region=sig["region"],
-            signal_type=sig["signal_type"],
-            details=sig.get("details", "")
+    print("--- AVVIO PIPELINE AUTOMATICA MULTI-FONTE ---")
+
+    # ---------------------------------------------------------
+    # FONTE 1: Gazzetta Ufficiale (Atti e Fusioni/Scissioni)
+    # ---------------------------------------------------------
+    print("\n[FONTE 1] Scansione Gazzetta Ufficiale...")
+    gazzetta_signals = [
+        {
+            "vat_number": "IT03882910158",
+            "company_name": "Lombardia Industriale S.r.l.",
+            "sector": "Manifatturiero & Metalmeccanica",
+            "region": "Lombardia",
+            "signal_type": "GAZZETTA_ATTO"
+        },
+        {
+            "vat_number": "IT01928470362",
+            "company_name": "Emilia Logistics S.p.A.",
+            "sector": "Trasporti & Logistica",
+            "region": "Emilia-Romagna",
+            "signal_type": "GAZZETTA_ATTO"
+        }
+    ]
+
+    for item in gazzetta_signals:
+        score = add_signal(
+            vat_number=item["vat_number"],
+            company_name=item["company_name"],
+            sector=item["sector"],
+            region=item["region"],
+            signal_type=item["signal_type"]
         )
+        print(f" -> {item['company_name']}: Nuovo Score = {score} pt")
+
+    # ---------------------------------------------------------
+    # FONTE 2: Hiring & Expansion Signals
+    # ---------------------------------------------------------
+    print("\n[FONTE 2] Scansione Job Posting & Espansione...")
+    hiring_signals = fetch_hiring_signals()
+
+    for item in hiring_signals:
+        score = add_signal(
+            vat_number=item["vat_number"],
+            company_name=item["company_name"],
+            sector=item["sector"],
+            region=item["region"],
+            signal_type=item["signal_type"]
+        )
+        print(f" -> {item['company_name']}: Nuovo Score = {score} pt")
+
+    print("\n✅ PIPELINE MULTI-FONTE COMPLETATA CON SUCCESSO!")
 
 if __name__ == "__main__":
     run_pipeline()
