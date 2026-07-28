@@ -4,14 +4,43 @@ import xml.etree.ElementTree as ET
 import re
 import hashlib
 
-def fetch_hiring_signals():
+def extract_company_name(title):
     """
-    Scansiona LIVE il web alla ricerca di notizie reali su assunzioni strategiche,
-    nomine di CFO, piani industriali e segnali M&A in Italia.
+    Estrae in modo intelligente il nome dell'azienda o ente dal titolo della notizia.
     """
-    print("🔍 Avvio scansione LIVE sul web per segnali di hiring ed espansione...")
+    # 1. Cerca forme societarie note (S.p.A., S.r.l., Group, ecc.)
+    legal_match = re.search(r'([A-Z0-9\s\&\.\'-]+?\b(?:S\.p\.A\.|S\.r\.l\.|SpA|Srl|Group|Holding)\b)', title, re.IGNORECASE)
+    if legal_match:
+        return legal_match.group(1).strip()
 
-    # Query di ricerca live su notizie corporate ed economia in Italia
+    # 2. Riconosce verbi/azioni chiave e prende il soggetto che precede
+    action_verbs = r'\b(si espande|cerca|assume|annuncia|firma|acquisisce|compra|nomina|investe|apre|rilancia|fonda)\b'
+    parts = re.split(action_verbs, title, flags=re.IGNORECASE)
+    if len(parts) > 1 and len(parts[0].strip()) > 2:
+        candidate = parts[0].strip()
+        # Pulizia prefissi comuni
+        candidate = re.sub(r'^(Fusione|Acquisizione|Accordo|Piani di assunzione per|Nuove assunzioni per|Assunzioni|Piano|Operazione)\s+(per|in|tra|di|con|da)?\s*', '', candidate, flags=re.IGNORECASE)
+        if 2 < len(candidate) <= 40:
+            return candidate.strip(' :,-')
+
+    # 3. Se presente il carattere due punti (es. "Ospedale di Perugia: assunzioni...")
+    if ":" in title:
+        first_part = title.split(":")[0].strip()
+        first_part = re.sub(r'^(Nuove assunzioni|Assunzioni|Offerta lavoro|Cercasi)\s+(in|per|a|all\'|alla)?\s*', '', first_part, flags=re.IGNORECASE)
+        if 2 < len(first_part) <= 40:
+            return first_part
+
+    # 4. Fallback: estrae le prime parole significative
+    words = title.split()
+    clean_words = [w for w in words[:4] if w.lower() not in ["nuove", "assunzioni", "carenza", "organici", "in", "per", "all'", "del", "della", "di"]]
+    fallback = " ".join(clean_words) if clean_words else title[:30]
+    return fallback[:35].strip(' :,-')
+
+
+def fetch_hiring_signals():
+    """Scansiona LIVE il web ed estrae aziende e segnali puliti."""
+    print("🔍 Avvio scansione LIVE con estrazione intelligene dei nomi aziendali...")
+
     rss_url = "https://news.google.com/rss/search?q=assunzioni+CFO+OR+%22M%26A%22+OR+fusione+OR+%22direttore+generale%22+azienda&hl=it&gl=IT&ceid=IT:it"
     
     headers = {
@@ -26,22 +55,23 @@ def fetch_hiring_signals():
             root = ET.fromstring(response.content)
             items = root.findall(".//item")
 
-            print(f"📡 Intercettate {len(items)} notizie reali dal web.")
+            print(f"📡 Analisi di {len(items)} articoli di notizie...")
 
-            for item in items[:10]:  # Analizziamo i 10 articoli più recenti
+            for item in items[:10]:
                 title = item.find("title").text if item.find("title") is not None else ""
-                
                 if not title:
                     continue
 
-                # Pulizia del titolo (rimuoviamo il nome della testata giornalistica alla fine)
                 clean_title = re.sub(r' - [^-]+$', '', title).strip()
 
-                # Generiamo una P.IVA sintetica/ID univoco basato sull'impronta hash del titolo
-                hash_id = hashlib.md5(clean_title.encode('utf-8')).hexdigest()[:10].upper()
+                # Estrazione pulita del nome dell'azienda
+                company_name = extract_company_name(clean_title)
+
+                # Generazione P.IVA/ID univoco
+                hash_id = hashlib.md5(company_name.lower().encode('utf-8')).hexdigest()[:10].upper()
                 vat_number = f"IT{hash_id}"
 
-                # Determinazione del tipo di segnale (max 50 caratteri per il database)
+                # Determinazione del tipo di segnale (max 50 car.)
                 title_upper = clean_title.upper()
                 if "CFO" in title_upper or "FINANCE" in title_upper:
                     signal_type = "HIRING: Nomina CFO / Finance"
@@ -51,9 +81,6 @@ def fetch_hiring_signals():
                     signal_type = "HIRING: Piano Assunzioni"
                 else:
                     signal_type = "EXPANSION: Segnale Corporate"
-
-                # Tagliamo il nome dell'azienda/notizia entro 250 caratteri
-                company_name = clean_title[:240]
 
                 detected_signals.append({
                     "vat_number": vat_number,
@@ -66,5 +93,5 @@ def fetch_hiring_signals():
     except Exception as e:
         print(f"⚠️ Errore durante lo scraping live: {e}")
 
-    print(f"✅ Estratti {len(detected_signals)} segnali reali ed elaborati.")
+    print(f"✅ Estratti {len(detected_signals)} segnali con nomi aziendali puliti.")
     return detected_signals
