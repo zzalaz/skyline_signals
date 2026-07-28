@@ -2,28 +2,26 @@
 import os
 import sqlite3
 import psycopg2
-from urllib.parse import urlparse
 
-# Legge la variabile d'ambiente DATABASE_URL (se presente usa Supabase, altrimenti SQLite locale)
-DATABASE_URL = os.getenv("DATABASE_URL")
+def get_db_url():
+    """Recupera la stringa di connessione sia da os.environ (GitHub Actions) sia da st.secrets (Streamlit Cloud)."""
+    if os.getenv("DATABASE_URL"):
+        return os.getenv("DATABASE_URL")
+    try:
+        import streamlit as st
+        if "DATABASE_URL" in st.secrets:
+            return st.secrets["DATABASE_URL"]
+    except Exception:
+        pass
+    return None
+
+DATABASE_URL = get_db_url()
 
 def get_connection():
     """Restituisce una connessione al DB Cloud (Postgres) o Locale (SQLite)."""
     if DATABASE_URL:
-        # Connessione a Supabase (PostgreSQL)
-        result = urlparse(DATABASE_URL)
-        username = result.username
-        password = result.password
-        database = result.path[1:]
-        hostname = result.hostname
-        port = result.port
-        return psycopg2.connect(
-            dbname=database,
-            user=username,
-            password=password,
-            host=hostname,
-            port=port
-        ), "postgres"
+        # Passiamo l'URL direttamente con SSL obbligatorio per Supabase
+        return psycopg2.connect(DATABASE_URL, sslmode='require'), "postgres"
     else:
         # Fallback su SQLite Locale
         return sqlite3.connect("ma_signals.db"), "sqlite"
@@ -33,7 +31,6 @@ def init_db():
     conn, db_type = get_connection()
     cursor = conn.cursor()
     
-    # Sintassi adattata per entrambi i tipi di DB
     if db_type == "postgres":
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS companies (
@@ -76,7 +73,7 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             company_id INTEGER,
             signal_type TEXT NOT NULL,
-            detected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            detected_at TEXT DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (company_id) REFERENCES companies (id)
         );
         """)
@@ -84,7 +81,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS company_scores (
             company_id INTEGER PRIMARY KEY,
             total_score INTEGER DEFAULT 0,
-            last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_updated TEXT DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (company_id) REFERENCES companies (id)
         );
         """)
