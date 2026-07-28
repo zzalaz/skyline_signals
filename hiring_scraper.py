@@ -4,45 +4,64 @@ import xml.etree.ElementTree as ET
 import re
 import hashlib
 
-def extract_company_name(title):
-    """
-    Estrae in modo intelligente il nome dell'azienda o ente dal titolo della notizia.
-    """
-    # 1. Cerca forme societarie note (S.p.A., S.r.l., Group, ecc.)
-    legal_match = re.search(r'([A-Z0-9\s\&\.\'-]+?\b(?:S\.p\.A\.|S\.r\.l\.|SpA|Srl|Group|Holding)\b)', title, re.IGNORECASE)
-    if legal_match:
-        return legal_match.group(1).strip()
+# Lista di termini generici o notizie pubbliche da scartare se scambiati per aziende
+NOISE_BLACKLIST = [
+    "sanità", "strutture pubbliche", "pubblica amministrazione", "ospedale",
+    "regione", "comune", "ministero", "sindacati", "in carenza", "via libera",
+    "firmati", "contratti", "nuove assunzioni", "piano assunzioni"
+]
 
-    # 2. Riconosce verbi/azioni chiave e prende il soggetto che precede
-    action_verbs = r'\b(si espande|cerca|assume|annuncia|firma|acquisisce|compra|nomina|investe|apre|rilancia|fonda)\b'
-    parts = re.split(action_verbs, title, flags=re.IGNORECASE)
-    if len(parts) > 1 and len(parts[0].strip()) > 2:
-        candidate = parts[0].strip()
-        # Pulizia prefissi comuni
-        candidate = re.sub(r'^(Fusione|Acquisizione|Accordo|Piani di assunzione per|Nuove assunzioni per|Assunzioni|Piano|Operazione)\s+(per|in|tra|di|con|da)?\s*', '', candidate, flags=re.IGNORECASE)
-        if 2 < len(candidate) <= 40:
-            return candidate.strip(' :,-')
+def clean_and_extract_company(title):
+    """Estrae e pulisce rigorosamente il nome dell'azienda o ente dal titolo."""
+    # 1. Rimuove virgolette, parentesi e caratteri speciali iniziali/finali
+    clean = re.sub(r'^[«"“\'’\s:-]+|[»"”\'’\s:-]+$', '', title).strip()
+    
+    # 2. Corregge prefissi spezzati tipo "ll'ospedale" o "all'Azienda"
+    clean = re.sub(r'^(?:[lLlhH][\'’]|all[\'’]|dall[\'’]|nell[\'’])\s*', '', clean).strip()
 
-    # 3. Se presente il carattere due punti (es. "Ospedale di Perugia: assunzioni...")
-    if ":" in title:
-        first_part = title.split(":")[0].strip()
-        first_part = re.sub(r'^(Nuove assunzioni|Assunzioni|Offerta lavoro|Cercasi)\s+(in|per|a|all\'|alla)?\s*', '', first_part, flags=re.IGNORECASE)
-        if 2 < len(first_part) <= 40:
-            return first_part
+    # 3. Riconosce forme societarie ufficiali (S.p.A., S.r.l., SpA, Srl, Group, Holding)
+    m = re.search(r'([A-Z0-9\s\&\.\'-]+?\b(?:S\.p\.A\.|S\.r\.l\.|SpA|Srl|Group|Holding)\b)', clean, re.IGNORECASE)
+    if m:
+        return m.group(1).strip()
 
-    # 4. Fallback: estrae le prime parole significative
-    words = title.split()
-    clean_words = [w for w in words[:4] if w.lower() not in ["nuove", "assunzioni", "carenza", "organici", "in", "per", "all'", "del", "della", "di"]]
-    fallback = " ".join(clean_words) if clean_words else title[:30]
-    return fallback[:35].strip(' :,-')
+    # 4. Gestisce titoli con azioni o due punti (es. "Sviluppo Campania: approvato...")
+    if ":" in clean:
+        candidate = clean.split(":")[0].strip()
+        candidate = re.sub(r',.*$', '', candidate).strip() # Rimuove incisi dopo la virgola
+        if len(candidate) >= 3 and not any(word in candidate.lower() for word in NOISE_BLACKLIST):
+            return candidate
+
+    # 5. Cerca il soggetto principale prima dei verbi di azione
+    match_verb = re.search(r'^(.*?)\s+(?:cerca|assume|annuncia|acquisisce|compra|investe|apre|firma|si espande)\b', clean, re.IGNORECASE)
+    if match_verb:
+        candidate = match_verb.group(1).strip()
+        candidate = re.sub(r'^(?:Fusione|Acquisizione|Intesa|Accordo)\s+', '', candidate, flags=re.IGNORECASE)
+        candidate = re.sub(r',.*$', '', candidate).strip()
+        if len(candidate) >= 3 and not any(word in candidate.lower() for word in NOISE_BLACKLIST):
+            return candidate
+
+    # 6. Fallback pulito: prende le prime parole significative
+    words = clean.split()
+    clean_words = []
+    for w in words[:4]:
+        w_clean = re.sub(r'[^\w\s]', '', w)
+        if w_clean.lower() not in ["nuove", "assunzioni", "carenza", "organici", "in", "per", "del", "della", "di", "con", "tra"]:
+            clean_words.append(w)
+        else:
+            break
+            
+    fallback = " ".join(clean_words).strip(' :,-«»"\'')
+    if len(fallback) >= 3 and not any(word in fallback.lower() for word in NOISE_BLACKLIST):
+        return fallback
+
+    return None
 
 
 def fetch_hiring_signals():
-    """Scansiona LIVE il web ed estrae aziende e segnali puliti."""
-    print("🔍 Avvio scansione LIVE con estrazione intelligene dei nomi aziendali...")
+    """Scansiona LIVE il web ed applica la validazione strict per entità societarie."""
+    print("🔍 Avvio scansione LIVE con Filtro di Qualificazione Entity...")
 
     rss_url = "https://news.google.com/rss/search?q=assunzioni+CFO+OR+%22M%26A%22+OR+fusione+OR+%22direttore+generale%22+azienda&hl=it&gl=IT&ceid=IT:it"
-    
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
     }
@@ -55,23 +74,28 @@ def fetch_hiring_signals():
             root = ET.fromstring(response.content)
             items = root.findall(".//item")
 
-            print(f"📡 Analisi di {len(items)} articoli di notizie...")
-
-            for item in items[:10]:
+            for item in items:
                 title = item.find("title").text if item.find("title") is not None else ""
                 if not title:
                     continue
 
+                # Rimuove nome testata giornalistica
                 clean_title = re.sub(r' - [^-]+$', '', title).strip()
 
-                # Estrazione pulita del nome dell'azienda
-                company_name = extract_company_name(clean_title)
+                # Estrazione e validazione rigorosa del nome azienda
+                company_name = clean_and_extract_company(clean_title)
+
+                # Scarta se non ha passato i controlli di qualità
+                if not company_name or len(company_name) < 3:
+                    continue
+                if any(noise in company_name.lower() for noise in NOISE_BLACKLIST):
+                    continue
 
                 # Generazione P.IVA/ID univoco
                 hash_id = hashlib.md5(company_name.lower().encode('utf-8')).hexdigest()[:10].upper()
                 vat_number = f"IT{hash_id}"
 
-                # Determinazione del tipo di segnale (max 50 car.)
+                # Determinazione segnale
                 title_upper = clean_title.upper()
                 if "CFO" in title_upper or "FINANCE" in title_upper:
                     signal_type = "HIRING: Nomina CFO / Finance"
@@ -90,8 +114,11 @@ def fetch_hiring_signals():
                     "signal_type": signal_type
                 })
 
+                if len(detected_signals) >= 10:
+                    break
+
     except Exception as e:
         print(f"⚠️ Errore durante lo scraping live: {e}")
 
-    print(f"✅ Estratti {len(detected_signals)} segnali con nomi aziendali puliti.")
+    print(f"✅ Filtro applicato: estratti {len(detected_signals)} soggetti societari validi.")
     return detected_signals
