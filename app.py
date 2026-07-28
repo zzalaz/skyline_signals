@@ -48,7 +48,8 @@ def load_company_signals(company_id):
     WHERE company_id = {placeholder}
     ORDER BY detected_at DESC
     """
-    df = pd.read_sql_query(query, conn, params=(company_id,))
+    # Cast esplicito a int nativo Python per garantire compatibilità con PostgreSQL (psycopg2)
+    df = pd.read_sql_query(query, conn, params=(int(company_id),))
     conn.close()
     return df
 
@@ -103,7 +104,7 @@ try:
                 options=filtered_df["Azienda"].tolist()
             )
             
-            selected_id = filtered_df[filtered_df["Azienda"] == selected_company]["id"].values[0]
+            selected_id = int(filtered_df[filtered_df["Azienda"] == selected_company]["id"].values[0])
             signals_df = load_company_signals(selected_id)
             
             st.write(f"**Cronologia eventi intercettati per:** _{selected_company}_")
