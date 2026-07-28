@@ -5,12 +5,55 @@ from database import init_db, get_connection
 
 # Configurazione della pagina
 st.set_page_config(
-    page_title="Skyline M&A Signals Dashboard",
+    page_title="Skyline M&A Signals — Portal",
     page_icon="📈",
     layout="wide"
 )
 
-# 1. Inizializza automaticamente le tabelle nel DB Cloud/Locale se non esistono
+# --- SISTEMA DI AUTENTICAZIONE ---
+def check_password():
+    """Restituisce True se l'utente ha inserito credenziali valide."""
+    def password_entered():
+        """Verifica se la combinazione utente/password corrisponde ai Secrets."""
+        user = st.session_state["username"]
+        pwd = st.session_state["password"]
+        
+        if "passwords" in st.secrets and user in st.secrets["passwords"]:
+            if pwd == st.secrets["passwords"][user]:
+                st.session_state["password_correct"] = True
+                del st.session_state["password"]  # Non salviamo la password in memoria
+                del st.session_state["username"]
+                return
+        st.session_state["password_correct"] = False
+
+    if st.session_state.get("password_correct", False):
+        return True
+
+    # Schermata di Login
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.markdown("## 🔒 Accesso Riservato — Skyline M&A Signals")
+        st.caption("Inserisci le tue credenziali per accedere al terminale di Corporate Intelligence.")
+        st.text_input("Username", key="username")
+        st.text_input("Password", type="password", key="password")
+        st.button("Accedi alla Dashboard", on_click=password_entered)
+
+        if "password_correct" in st.session_state and not st.session_state["password_correct"]:
+            st.error("⚠️ Username o Password non validi.")
+
+    return False
+
+# Blocca l'esecuzione se l'utente non è autenticato
+if not check_password():
+    st.stop()
+
+# --- LOGOUT BARRA LATERALE ---
+st.sidebar.markdown("### 👤 Sessione Attiva")
+if st.sidebar.button("Disconnetti (Logout)"):
+    st.session_state["password_correct"] = False
+    st.rerun()
+
+# --- INIZIALIZZAZIONE DATABASE ---
 init_db()
 
 st.title("📈 Skyline M&A Signals — Corporate Intelligence")
@@ -48,7 +91,6 @@ def load_company_signals(company_id):
     WHERE company_id = {placeholder}
     ORDER BY detected_at DESC
     """
-    # Cast esplicito a int nativo Python per garantire compatibilità con PostgreSQL (psycopg2)
     df = pd.read_sql_query(query, conn, params=(int(company_id),))
     conn.close()
     return df
@@ -70,7 +112,7 @@ try:
     st.divider()
 
     if df.empty:
-        st.info("ℹ️ Il database cloud è attivo e pronto, ma non contiene ancora segnali salvati. Verrà popolato automaticamente dalle prossime scansioni.")
+        st.info("ℹ️ Il database cloud è attivo e pronto, ma non contiene ancora segnali salvati.")
     else:
         # --- BARRA LATERALE PER I FILTRI ---
         st.sidebar.header("🔍 Filtri di Ricerca")
