@@ -1,0 +1,27 @@
+name: Daily M&A Signals Scraping
+
+on:
+  schedule:
+    # Esegue ogni giorno alle 07:00 UTC (corrispondenti alle 08:00/09:00 italiane)
+    - cron: '0 7 * * *'
+  workflow_dispatch: # Permette anche il lancio manuale da interfaccia GitHub
+
+jobs:
+  run-scraper:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Scarica il codice del repository
+        uses: actions/checkout@v3
+
+      - name: Configura Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Installa dipendenze
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Esegui Pipeline M&A
+        run: python main.py
