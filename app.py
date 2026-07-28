@@ -1,10 +1,7 @@
 # app.py
 import streamlit as st
-import sqlite3
 import pandas as pd
-from database import init_db  # Inizializzatore schema DB
-
-DB_NAME = "ma_signals.db"
+from database import init_db, get_connection
 
 # Configurazione della pagina
 st.set_page_config(
@@ -13,15 +10,15 @@ st.set_page_config(
     layout="wide"
 )
 
-# 1. Inizializza automaticamente le tabelle nel cloud se non esistono
+# 1. Inizializza automaticamente le tabelle nel DB Cloud/Locale se non esistono
 init_db()
 
 st.title("📈 Skyline M&A Signals — Corporate Intelligence")
 st.caption("Piattaforma di monitoraggio e identificazione precoce di target societari M&A")
 
 def load_data():
-    """Carica le aziende con il rispettivo punteggio aggiornato."""
-    conn = sqlite3.connect(DB_NAME)
+    """Carica le aziende con il rispettivo punteggio aggiornato dal DB."""
+    conn, _ = get_connection()
     query = """
     SELECT 
         c.id,
@@ -41,13 +38,14 @@ def load_data():
 
 def load_company_signals(company_id):
     """Carica la cronologia dei segnali intercettati per un'azienda specifica."""
-    conn = sqlite3.connect(DB_NAME)
-    query = """
+    conn, db_type = get_connection()
+    placeholder = "%s" if db_type == "postgres" else "?"
+    query = f"""
     SELECT 
         signal_type AS "Tipo Segnale",
         detected_at AS "Data Rilevamento"
     FROM raw_signals
-    WHERE company_id = ?
+    WHERE company_id = {placeholder}
     ORDER BY detected_at DESC
     """
     df = pd.read_sql_query(query, conn, params=(company_id,))
@@ -71,7 +69,7 @@ try:
     st.divider()
 
     if df.empty:
-        st.info("ℹ️ Il database è attivo ma non contiene ancora segnali registrati. Verrà popolato automaticamente dalle prossime scansioni.")
+        st.info("ℹ️ Il database cloud è attivo e pronto, ma non contiene ancora segnali salvati. Verrà popolato automaticamente dalle prossime scansioni.")
     else:
         # --- BARRA LATERALE PER I FILTRI ---
         st.sidebar.header("🔍 Filtri di Ricerca")
