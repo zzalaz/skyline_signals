@@ -1,102 +1,68 @@
-import sqlite3
-from datetime import datetime
+# engine.py
+from database import get_connection, init_db
 
-DB_NAME = "ma_signals.db"
-
-# Tabella dei pesi base per ciascuna tipologia di segnale
-SIGNAL_WEIGHTS = {
-    "GAZZETTA_ATTO": 35,      # Fusioni, scissioni, aumenti di capitale
-    "NEW_PATENT": 25,         # Registrazione di nuovi brevetti o marchi
-    "HIRING_SPIKE": 20,       # Impennata di posizioni aperte / recruiting
-    "WEBSITE_TRAFFIC": 15     # Aumento rilevante del traffico web
-}
-
-def add_signal(vat_number: str, company_name: str, sector: str, region: str, signal_type: str) -> int:
-    """
-    Registra l'azienda e il segnale intercettato, quindi ricalcola e restituisce il punteggio totale.
-    """
-    conn = sqlite3.connect(DB_NAME)
+def add_signal(vat_number, company_name, sector, region, signal_type):
+    """Aggiunge un segnale al database centralizzato, creando l'azienda se non esiste, e aggiorna lo score."""
+    # 1. Assicuriamo che le tabelle esistano nel database corrente
+    init_db()
+    
+    conn, db_type = get_connection()
     cursor = conn.cursor()
     
-    # 1. Inserisce l'azienda o aggiorna i dati se la P.IVA è già presente (UPSERT)
-    cursor.execute('''
-        INSERT INTO companies (name, vat_number, sector, region)
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT(vat_number) DO UPDATE SET 
-            name = excluded.name,
-            sector = excluded.sector,
-            region = excluded.region
-    ''', (company_name, vat_number, sector, region))
-    
-    # Recupera l'ID dell'azienda
-    cursor.execute('SELECT id FROM companies WHERE vat_number = ?', (vat_number,))
-    company_id = cursor.fetchone()[0]
-    
-    # 2. Registra il nuovo segnale nella tabella dei segnali grezzi
-    cursor.execute('''
+    ph = "%s" if db_type == "postgres" else "?"
+
+    try:
+        # 2. Inserisci o aggiorna l'azienda
+        if db_type == "postgres":
+            cursor.execute(f"""
+            INSERT INTO companies (vat_number, name, sector, region)
+            VALUES ({ph}, {ph}, {ph}, {ph})
+            ON CONFLICT (vat_number) DO UPDATE 
+            SET name = EXCLUDED.name, sector = EXCLUDED.sector, region = EXCLUDED.region
+            RETURNING id;
+            """, (vat_number, company_name, sector, region))
+            company_id = cursor.fetchone()[0]
+        else:
+            cursor.execute(f"""
+            INSERT OR IGNORE INTO companies (vat_number, name, sector, region)
+            VALUES ({ph}, {ph}, {ph}, {ph});
+            """, (vat_number, company_name, sector, region))
+            cursor.execute(f"SELECT id FROM companies WHERE vat_number = {ph};", (vat_number,))
+            company_id = cursor.fetchone()[0]
+
+        # 3. Registra il nuovo segnale grezzo
+        cursor.execute(f"""
         INSERT INTO raw_signals (company_id, signal_type)
-        VALUES (?, ?)
-    ''', (company_id, signal_type))
-    
-    conn.commit()
-    conn.close()
-    
-    # 3. Ricalcola e salva il punteggio complessivo aggiornato
-    return update_score(company_id)
+        VALUES ({ph}, {ph});
+        """, (company_id, signal_type))
 
-def update_score(company_id: int) -> int:
-    """
-    Recupera tutti i segnali dell'azienda e calcola il punteggio ponderato in base al tempo trascorso.
-    """
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    
-    cursor.execute('''
-        SELECT signal_type, detected_at 
-        FROM raw_signals 
-        WHERE company_id = ?
-    ''', (company_id,))
-    signals = cursor.fetchall()
-    
-    total_score = 0.0
-    now = datetime.now()
-    
-    for sig_type, detected_at_str in signals:
-        try:
-            detected_at = datetime.strptime(detected_at_str, "%Y-%m-%d %H:%M:%S")
-        except ValueError:
-            detected_at = datetime.fromisoformat(detected_at_str)
-            
-        days_old = (now - detected_at).days
-        base_weight = SIGNAL_WEIGHTS.get(sig_type, 10)
-        
-        # Decadimento temporale: il peso diminuisce gradualmente nell'arco di 60 giorni
-        decay_factor = max(0.1, 1.0 - (days_old / 60.0))
-        total_score += base_weight * decay_factor
-        
-    final_score = int(round(total_score))
-    
-    # Salva o aggiorna il punteggio calcolato
-    cursor.execute('''
-        INSERT INTO company_scores (company_id, total_score, last_updated)
-        VALUES (?, ?, CURRENT_TIMESTAMP)
-        ON CONFLICT(company_id) DO UPDATE SET 
-            total_score = excluded.total_score,
-            last_updated = CURRENT_TIMESTAMP
-    ''', (company_id, final_score))
-    
-    conn.commit()
-    conn.close()
-    
-    return final_score
+        # 4. Calcola e aggiorna il punteggio di M&A Target
+        score_delta = 20 if "Gazzetta" in signal_type or "Liquidazione" in signal_type else 10
 
-if __name__ == "__main__":
-    # Test di prova direttamente sul file
-    test_score = add_signal(
-        vat_number="09876543210",
-        company_name="Innovazione Industriale S.r.l.",
-        sector="Meccatronica",
-        region="Emilia-Romagna",
-        signal_type="NEW_PATENT"
-    )
-    print(f"✅ Test engine eseguito! Punteggio azienda: {test_score}")
+        if db_type == "postgres":
+            cursor.execute(f"""
+            INSERT INTO company_scores (company_id, total_score, last_updated)
+            VALUES ({ph}, {ph}, CURRENT_TIMESTAMP)
+            ON CONFLICT (company_id) DO UPDATE 
+            SET total_score = company_scores.total_score + {ph}, last_updated = CURRENT_TIMESTAMP
+            RETURNING total_score;
+            """, (company_id, score_delta, score_delta))
+            new_score = cursor.fetchone()[0]
+        else:
+            cursor.execute(f"""
+            INSERT INTO company_scores (company_id, total_score, last_updated)
+            VALUES ({ph}, {ph}, CURRENT_TIMESTAMP)
+            ON CONFLICT(company_id) DO UPDATE 
+            SET total_score = total_score + {ph}, last_updated = CURRENT_TIMESTAMP;
+            """, (company_id, score_delta, score_delta))
+            cursor.execute(f"SELECT total_score FROM company_scores WHERE company_id = {ph};", (company_id,))
+            new_score = cursor.fetchone()[0]
+
+        conn.commit()
+        return new_score
+
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        conn.close()
