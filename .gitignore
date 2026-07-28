@@ -1,0 +1,17 @@
+# Ambiente virtuale
+venv/
+ENV/
+env/
+
+# Database locale SQLite (I dati reali risiederanno sul server o in DB separato)
+*.db
+*.sqlite3
+
+# Cache di Python
+__pycache__/
+*.py[cod]
+
+# Configurazione ambienti e variabili segrete
+.env
+.vscode/
+.idea/
