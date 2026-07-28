@@ -1,27 +1,12 @@
 # main.py
 from engine import add_signal
 from hiring_scraper import fetch_hiring_signals
-from database import get_connection
-
-def clean_old_dirty_data():
-    """Pulisce solo le vecchie righe contenenti stringhe imperfette."""
-    try:
-        conn, _ = get_connection()
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM raw_signals;")
-        cursor.execute("DELETE FROM company_scores;")
-        cursor.execute("DELETE FROM companies;")
-        conn.commit()
-        conn.close()
-        print("🧹 Database azzerato per applicare la nuova pulizia strict.")
-    except Exception as e:
-        print(f"⚠️ Nota pulizia: {e}")
 
 def run_pipeline():
     print("--- AVVIO PIPELINE AUTOMATICA PRODUCTION ---")
 
-    # Pulizia una tantum dei vecchi dati
-    clean_old_dirty_data()
+    # NOTA: Il reset del DB è disattivato per consentire l'accumulo dei dati nel tempo
+    # e far salire lo score delle aziende ad ogni nuova rilevazione.
 
     # 1. Estrazione segnali reali dal web
     signals = fetch_hiring_signals()

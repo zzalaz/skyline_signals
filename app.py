@@ -14,14 +14,13 @@ st.set_page_config(
 def check_password():
     """Restituisce True se l'utente ha inserito credenziali valide."""
     def password_entered():
-        """Verifica se la combinazione utente/password corrisponde ai Secrets."""
         user = st.session_state["username"]
         pwd = st.session_state["password"]
         
         if "passwords" in st.secrets and user in st.secrets["passwords"]:
             if pwd == st.secrets["passwords"][user]:
                 st.session_state["password_correct"] = True
-                del st.session_state["password"]  # Non salviamo la password in memoria
+                del st.session_state["password"]
                 del st.session_state["username"]
                 return
         st.session_state["password_correct"] = False
@@ -43,7 +42,6 @@ def check_password():
 
     return False
 
-# Blocca l'esecuzione se l'utente non è autenticato
 if not check_password():
     st.stop()
 
@@ -73,7 +71,7 @@ def load_data():
         s.last_updated AS "Ultimo Aggiornamento"
     FROM companies c
     JOIN company_scores s ON c.id = s.company_id
-    ORDER BY s.total_score DESC
+    ORDER BY s.total_score DESC, s.last_updated DESC
     """
     df = pd.read_sql_query(query, conn)
     conn.close()
@@ -127,8 +125,21 @@ try:
                 filtered_df["P.IVA"].str.contains(search_query, case=False, na=False)
             ]
 
+        # --- INTESTAZIONE TABELLA + PULSANTE EXPORT ---
+        col_title, col_download = st.columns([3, 1])
+        with col_title:
+            st.subheader("📊 Classifica Target M&A")
+        with col_download:
+            csv_data = filtered_df.drop(columns=["id"]).to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Esporta Report CSV",
+                data=csv_data,
+                file_name="Skyline_MA_Targets_Report.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+
         # --- TABELLA PRINCIPALE ---
-        st.subheader("📊 Classifica Target M&A")
         display_df = filtered_df.drop(columns=["id"])
         st.dataframe(
             display_df,
