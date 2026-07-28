@@ -4,7 +4,7 @@ import sqlite3
 import psycopg2
 
 def get_db_url():
-    """Recupera la stringa di connessione sia da os.environ (GitHub Actions) sia da st.secrets (Streamlit Cloud)."""
+    """Recupera la stringa di connessione dinamica sia da os.environ (GitHub Actions) sia da st.secrets (Streamlit Cloud)."""
     if os.getenv("DATABASE_URL"):
         return os.getenv("DATABASE_URL")
     try:
@@ -15,13 +15,13 @@ def get_db_url():
         pass
     return None
 
-DATABASE_URL = get_db_url()
-
 def get_connection():
     """Restituisce una connessione al DB Cloud (Postgres) o Locale (SQLite)."""
-    if DATABASE_URL:
+    db_url = get_db_url()
+    
+    if db_url:
         # Passiamo l'URL direttamente con SSL obbligatorio per Supabase
-        return psycopg2.connect(DATABASE_URL, sslmode='require'), "postgres"
+        return psycopg2.connect(db_url, sslmode='require'), "postgres"
     else:
         # Fallback su SQLite Locale
         return sqlite3.connect("ma_signals.db"), "sqlite"
