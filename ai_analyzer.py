@@ -2,19 +2,27 @@
 import google.generativeai as genai
 import streamlit as st
 
+def get_gemini_api_key():
+    """Recupera la chiave API da st.secrets gestendo eventuali strutture TOML."""
+    if "GEMINI_API_KEY" in st.secrets:
+        return st.secrets["GEMINI_API_KEY"]
+    if "passwords" in st.secrets and "GEMINI_API_KEY" in st.secrets["passwords"]:
+        return st.secrets["passwords"]["GEMINI_API_KEY"]
+    return None
+
 def generate_executive_summary(company_name, signals):
     """
     Genera un Executive Briefing B2B ad alto livello basato sui segnali M&A dell'azienda.
     """
-    api_key = st.secrets.get("GEMINI_API_KEY", None)
+    api_key = get_gemini_api_key()
+    
     if not api_key:
-        return "⚠️ **Errore:** `GEMINI_API_KEY` non configurata nei Secrets di Streamlit."
+        return "⚠️ **Errore:** `GEMINI_API_KEY` non trovata nei Secrets. Assicurati che sia scritta in cima al file Secrets su Streamlit Cloud."
 
     try:
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel('gemini-1.5-flash')
 
-        # Formattazione cronologia segnali per l'AI
         signals_text = "\n".join([f"- [{s['Tipo Segnale']}] Rilevato il: {s['Data Rilevamento']}" for s in signals])
 
         prompt = f"""
