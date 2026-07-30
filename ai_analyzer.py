@@ -10,23 +10,6 @@ def get_gemini_api_key():
         return st.secrets["passwords"]["GEMINI_API_KEY"]
     return None
 
-def get_working_model():
-    """Individua ed seleziona automaticamente un modello Gemini attivo e compatibile."""
-    try:
-        available_models = genai.list_models()
-        for m in available_models:
-            if 'generateContent' in m.supported_generation_methods:
-                # Privilegia i modelli flash/pro
-                if any(name in m.name for name in ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro', 'flash']):
-                    return m.name
-        # Fallback: il primo modello abilitato alla generazione testo
-        for m in available_models:
-            if 'generateContent' in m.supported_generation_methods:
-                return m.name
-    except Exception:
-        pass
-    return 'gemini-1.5-flash'  # Fallback di sicurezza
-
 def generate_executive_summary(company_name, signals):
     """
     Genera un Executive Briefing B2B ad alto livello basato sui segnali M&A dell'azienda.
@@ -36,41 +19,46 @@ def generate_executive_summary(company_name, signals):
     if not api_key:
         return "⚠️ **Errore:** `GEMINI_API_KEY` non trovata nei Secrets. Assicurati che sia scritta in cima al file Secrets su Streamlit Cloud."
 
-    try:
-        genai.configure(api_key=api_key)
-        
-        # Selezione dinamica del modello attivo
-        model_name = get_working_model()
-        model = genai.GenerativeModel(model_name)
+    genai.configure(api_key=api_key)
 
-        signals_text = "\n".join([f"- [{s['Tipo Segnale']}] Rilevato il: {s['Data Rilevamento']}" for s in signals])
+    signals_text = "\n".join([f"- [{s['Tipo Segnale']}] Rilevato il: {s['Data Rilevamento']}" for s in signals])
 
-        prompt = f"""
-        Sei un Senior M&A Partner & Corporate Intelligence Analyst.
-        Analizza i seguenti segnali di mercato intercettati per l'azienda: **{company_name}**.
+    prompt = f"""
+    Sei un Senior M&A Partner & Corporate Intelligence Analyst.
+    Analizza i seguenti segnali di mercato intercettati per l'azienda: **{company_name}**.
 
-        CRONOLOGIA SEGNALI INTERCETTATI:
-        {signals_text}
+    CRONOLOGIA SEGNALI INTERCETTATI:
+    {signals_text}
 
-        Redigi un Executive Briefing B2B sintetico e formattato in Markdown per un Advisor o Fondo di Private Equity.
-        Risolvi e rispetta tassativamente questa struttura:
+    Redigi un Executive Briefing B2B sintetico e formattato in Markdown per un Advisor o Fondo di Private Equity.
+    Rispetta tassativamente questa struttura:
 
-        ### 💡 Razionale Strategico M&A
-        (Spiega in 2-3 frasi cosa indicano questi segnali combinati: potenziale acquisizione, cessione di ramo, ristrutturazione o espansione)
+    ### 💡 Razionale Strategico M&A
+    (Spiega in 2-3 frasi cosa indicano questi segnali combinati: potenziale acquisizione, cessione di ramo, ristrutturazione o espansione)
 
-        ### 🎯 Opportunità & Rischi
-        * **Opportunità:** (Punto chiave)
-        * **Rischi:** (Punto chiave da monitorare)
+    ### 🎯 Opportunità & Rischi
+    * **Opportunità:** (Punto chiave)
+    * **Rischi:** (Punto chiave da monitorare)
 
-        ### 🚀 Next Steps Raccomandati
-        1. (Azione pratica per l'advisor, es. verifica Visura Camerale o contatto M&A)
-        2. (Secondo step operativo)
+    ### 🚀 Next Steps Raccomandati
+    1. (Azione pratica per l'advisor, es. verifica Visura Camerale o contatto M&A)
+    2. (Secondo step operativo)
 
-        Mantieni un tono istituzionale, sintetico e rigoroso.
-        """
+    Mantieni un tono istituzionale, sintetico e rigoroso.
+    """
 
-        response = model.generate_content(prompt)
-        return response.text
+    # Lista ordinata di modelli stabili e ufficialmente supportati
+    candidate_models = ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro']
+    
+    last_error = None
+    for model_name in candidate_models:
+        try:
+            model = genai.GenerativeModel(model_name)
+            response = model.generate_content(prompt)
+            if response and response.text:
+                return response.text
+        except Exception as e:
+            last_error = e
+            continue
 
-    except Exception as e:
-        return f"⚠️ Errore durante l'elaborazione del report AI: {e}"
+    return f"⚠️ Errore durante l'elaborazione del report AI: {last_error}"
